@@ -26,6 +26,17 @@ pub struct Simulation {
 }
 
 impl Simulation {
+    // Creates a four way intersection with the following structure
+    //          2    3
+    //          |    ^
+    //          V    |
+    //    4<----10<--11<----6
+    //          |    ^
+    //          V    |
+    //    5---->8--->9----->7
+    //          |    ^
+    //          V    |
+    //          0    1
     pub fn create() -> Self {
         // Bevy uses a right handed y-up coordinate system
         // This means that the forward vector is -z
