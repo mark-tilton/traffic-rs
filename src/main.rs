@@ -1,16 +1,16 @@
 use bevy::prelude::*;
 
-mod simulation;
+mod nodegraph;
 
 fn main() {
-    let sim = simulation::Simulation::create();
+    let graph = nodegraph::NodeGraph::create();
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
-        .add_systems(Update, simulation::spawn_vehicle)
-        .add_systems(Update, simulation::set_vehicle_position)
-        .add_systems(Update, simulation::show_node_graph)
-        .insert_resource(sim)
+        .add_systems(Update, nodegraph::spawn_vehicle)
+        .add_systems(Update, nodegraph::move_vehicles)
+        .add_systems(Update, nodegraph::show_node_graph)
+        .insert_resource(graph)
         .run();
 }
 
