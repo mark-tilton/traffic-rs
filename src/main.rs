@@ -1,14 +1,16 @@
 use bevy::prelude::*;
 
-mod movement;
-mod vehicles;
+mod simulation;
 
 fn main() {
+    let sim = simulation::Simulation::create();
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
-        .add_systems(Startup, vehicles::spawn_vehicles)
-        .add_systems(Update, (movement::velocity, movement::acceleration))
+        .add_systems(Update, simulation::spawn_vehicle)
+        .add_systems(Update, simulation::set_vehicle_position)
+        .add_systems(Update, simulation::show_node_graph)
+        .insert_resource(sim)
         .run();
 }
 
@@ -23,8 +25,9 @@ fn setup(
     // plane
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(Plane3d::default().mesh().size(20., 20.)),
+            mesh: meshes.add(Plane3d::default().mesh().size(25., 25.)),
             material: materials.add(Color::srgb(0.3, 0.5, 0.3)),
+            transform: Transform::from_xyz(0., -1., 0.),
             ..default()
         },
         Ground,
@@ -38,7 +41,7 @@ fn setup(
 
     // camera
     commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(15.0, 5.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+        transform: Transform::from_xyz(0., 25., 15.).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
 }
