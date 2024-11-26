@@ -112,6 +112,9 @@ pub fn spawn_vehicle(
     node_graph: ResMut<NodeGraph>,
 ) {
     let mut rng = rand::thread_rng();
+    if rand::random::<f32>() > 0.05 {
+        return;
+    }
     let Some(start_node) = node_graph.source_nodes.iter().choose(&mut rng) else {
         return;
     };
@@ -136,10 +139,12 @@ pub fn spawn_vehicle(
         path_position: 0,
     };
 
+    let start_node_position = node_graph.nodes.get(*start_node).unwrap().position;
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(Cuboid::new(0.3, 0.2, 0.5).mesh()),
             material: materials.add(Color::srgb(0.3, 0.3, 0.5)),
+            transform: Transform::from_translation(start_node_position),
             ..default()
         },
         vehicle,
@@ -147,18 +152,14 @@ pub fn spawn_vehicle(
 }
 
 pub fn move_vehicles(
-    mut vehicle_query: Query<(&mut Transform, &mut Vehicle)>,
+    mut commands: Commands,
+    mut vehicle_query: Query<(Entity, &mut Transform, &mut Vehicle)>,
     node_graph: Res<NodeGraph>,
+    time: Res<Time>,
 ) {
-    for (mut transform, mut vehicle) in &mut vehicle_query {
-        vehicle.edge_position += 0.01;
-        if vehicle.edge_position > 1. {
-            vehicle.path_position += 1;
-            vehicle.edge_position = 0.;
-        }
-        if vehicle.path_position >= vehicle.node_path.len() - 1 {
-            continue;
-        }
+    for (entity, mut transform, mut vehicle) in &mut vehicle_query {
+        let speed = 3.;
+
         let start_node = node_graph
             .nodes
             .get(*vehicle.node_path.get(vehicle.path_position).unwrap())
@@ -168,6 +169,18 @@ pub fn move_vehicles(
             .get(*vehicle.node_path.get(vehicle.path_position + 1).unwrap())
             .unwrap();
         let start_to_next = next_node.position - start_node.position;
+        let edge_speed = speed / start_to_next.length();
+
+        vehicle.edge_position += edge_speed * time.delta_seconds();
+        if vehicle.edge_position > 1. {
+            vehicle.path_position += 1;
+            vehicle.edge_position = 0.;
+            if vehicle.path_position >= vehicle.node_path.len() - 1 {
+                commands.entity(entity).despawn();
+            }
+            continue;
+        }
+
         transform.translation = start_node.position + start_to_next * vehicle.edge_position;
         transform.look_at(next_node.position, Dir3::Y);
     }
