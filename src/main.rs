@@ -1,9 +1,14 @@
+use std::time::Duration;
+
 use bevy::prelude::*;
 
 mod nodegraph;
+mod vehicle_spawn_limiter;
 
 fn main() {
     let graph = nodegraph::NodeGraph::create();
+    let spawn_interval = Duration::from_millis(750);
+    let spawn_limiter = vehicle_spawn_limiter::VehicleSpawnLimiter::new(spawn_interval);
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
@@ -11,6 +16,7 @@ fn main() {
         .add_systems(Update, nodegraph::move_vehicles)
         .add_systems(Update, nodegraph::show_node_graph)
         .insert_resource(graph)
+        .insert_resource(spawn_limiter)
         .run();
 }
 

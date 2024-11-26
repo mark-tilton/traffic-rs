@@ -3,6 +3,8 @@ use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
 
+use crate::vehicle_spawn_limiter::VehicleSpawnLimiter;
+
 #[derive(Component)]
 pub struct Vehicle {
     edge_position: f32,
@@ -110,11 +112,13 @@ pub fn spawn_vehicle(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     node_graph: ResMut<NodeGraph>,
+    mut spawn_limiter: ResMut<VehicleSpawnLimiter>
 ) {
-    let mut rng = rand::thread_rng();
-    if rand::random::<f32>() > 0.05 {
+    if !spawn_limiter.try_spawn() {
         return;
     }
+
+    let mut rng = rand::thread_rng();
     let Some(start_node) = node_graph.source_nodes.iter().choose(&mut rng) else {
         return;
     };
