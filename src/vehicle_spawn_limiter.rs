@@ -5,7 +5,7 @@ use bevy::prelude::Resource;
 #[derive(Resource, Default)]
 pub struct VehicleSpawnLimiter {
     interval: Duration,
-    last_spawned: Option<Instant>
+    last_spawned: Option<Instant>,
 }
 
 impl VehicleSpawnLimiter {
