@@ -2,7 +2,10 @@ use rand::{self, seq::IteratorRandom};
 
 use bevy::prelude::*;
 
-use crate::{node_graph::NodeGraph, vehicle_spawn_limiter::VehicleSpawnLimiter};
+use crate::{
+    node_graph::{Node, NodeGraph},
+    vehicle_spawn_limiter::VehicleSpawnLimiter,
+};
 
 #[derive(Component)]
 pub struct Vehicle {
@@ -15,11 +18,72 @@ pub struct Vehicle {
     edge_position: f32,
 }
 
+impl Vehicle {
+    // These getter functions will panic if the vehicle is in a malformed state or
+    // if the node graph is mutated
+    fn get_current_node<'a>(&self, node_graph: &'a NodeGraph) -> &'a Node {
+        let node_index = self.path[self.path_index];
+        &node_graph.nodes[node_index]
+    }
+
+    // A vehicle at the end of its path will not have a next node so this function
+    // optionally returns a next node
+    fn get_next_node<'a>(&self, node_graph: &'a NodeGraph) -> Option<&'a Node> {
+        let node_index = self.path.get(self.path_index + 1)?;
+        Some(&node_graph.nodes[*node_index])
+    }
+
+    // Gets the world position of the vehicle by interpolating between the
+    // positions of the current and next nodes
+    fn get_world_position(&self, node_graph: &NodeGraph) -> Vec3 {
+        let current_node_pos = self.get_current_node(node_graph).position;
+        let Some(next_node) = self.get_next_node(node_graph) else {
+            // If there is no next node, the position will just be the current(last) node.
+            return current_node_pos;
+        };
+        current_node_pos + (next_node.position - current_node_pos) * self.edge_position
+    }
+
+    // Attempts to drive along the current edge by a given world space distance.
+    // If the vehicle hits the end of the edge, the path will be incremented and
+    // the remaining distance will be returned.
+    fn drive_edge(&mut self, distance: f32, node_graph: &NodeGraph) -> f32 {
+        // Calculate the parameterized speed of the vehicle along the edge
+        // by querying the current and next nodes
+        let current_node = self.get_current_node(node_graph);
+        let Some(next_node) = self.get_next_node(node_graph) else {
+            // If there is no next node, there is no remaining distance to drive
+            return 0.;
+        };
+        let edge_vector = next_node.position - current_node.position;
+        let edge_speed = distance / edge_vector.length();
+
+        // Move the vehicle along the edge. If we go past the end of the
+        // edge, increment to the next edge.
+        self.edge_position += edge_speed;
+        if self.edge_position > 1. {
+            let overshoot = self.edge_position - 1.;
+            self.path_index += 1;
+            self.edge_position = 0.;
+            return overshoot * edge_vector.length();
+        }
+        0.
+    }
+
+    // Drives along the vehicles node path by a specified world space distance
+    fn drive(&mut self, distance: f32, node_graph: &NodeGraph) {
+        let mut remaining_distance = distance;
+        while remaining_distance > 0. {
+            remaining_distance = self.drive_edge(remaining_distance, node_graph);
+        }
+    }
+}
+
 pub fn spawn_vehicle(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    node_graph: ResMut<NodeGraph>,
+    node_graph: Res<NodeGraph>,
     mut spawn_limiter: ResMut<VehicleSpawnLimiter>,
 ) {
     // Only allow vehicle spawning at certain intervals
@@ -27,7 +91,7 @@ pub fn spawn_vehicle(
         return;
     }
 
-    // Choose a random starting node for the path.
+    // Choose a random starting node for the path
     let mut rng = rand::thread_rng();
     let Some(start_node) = node_graph.source_nodes.iter().choose(&mut rng) else {
         return;
@@ -81,50 +145,17 @@ pub fn move_vehicles(
     time: Res<Time>,
 ) {
     for (entity, mut transform, mut vehicle) in &mut vehicle_query {
-        let speed = 3.;
+        let speed = 5.;
 
-        // Calculate the parameterized speed of the vehicle along the edge
-        // by querying the start and end nodes.
-        let start_node_index = *vehicle
-            .path
-            .get(vehicle.path_index)
-            .expect("Vehicle path index past end of path");
-        let next_node_index = *vehicle
-            .path
-            .get(vehicle.path_index + 1)
-            .expect("Attempted to process node at the end of its path");
-        let start_node = node_graph
-            .nodes
-            .get(start_node_index)
-            .expect("Node doesn't exist in the graph");
-        let next_node = node_graph
-            .nodes
-            .get(next_node_index)
-            .expect("Node doesn't exist in the graph");
-        let start_to_next = next_node.position - start_node.position;
-        let edge_speed = speed / start_to_next.length();
+        // Drive the given distance and update the position of the transform
+        vehicle.drive(speed * time.delta_seconds(), &node_graph);
+        transform.translation = vehicle.get_world_position(&node_graph);
 
-        // Move the vehicle along the edge. If we go past the end of the
-        // edge, increment to the next edge.
-        vehicle.edge_position += edge_speed * time.delta_seconds();
-        if vehicle.edge_position > 1. {
-            vehicle.path_index += 1;
-            vehicle.edge_position = 0.;
-
-            // If we are at the end of the node path, despawn the vehicle.
-            if vehicle.path_index >= vehicle.path.len() - 1 {
-                commands.entity(entity).despawn();
-            }
-
-            // If we go to the next edge, skip updating the transform.
-            // Next frame the vehicle will be snapped to the next edge.
-            // We could / should recalculate the edge speed here and
-            // continue along the next edge.
+        // Despawn the vehicle if it's on the final node.
+        let Some(next_node) = vehicle.get_next_node(&node_graph) else {
+            commands.entity(entity).despawn();
             continue;
-        }
-
-        // Update the postiion of the vehicle entity.
-        transform.translation = start_node.position + start_to_next * vehicle.edge_position;
+        };
         transform.look_at(next_node.position, Dir3::Y);
     }
 }
