@@ -197,25 +197,24 @@ fn calculate_distance_map(
     distance_map.insert(source_node, 0);
     queue.push_back(source_node);
 
-    // TODO: Reduce nesting
     // Do a breadth first search of the tree
     loop {
-        if let Some(node) = queue.pop_front() {
-            let distance = *distance_map
-                .get(&node)
-                .expect("Queued node should have a distance");
-            if let Some(connections) = node_map.get(&node) {
-                for connection in connections {
-                    if !distance_map.contains_key(connection) {
-                        distance_map.insert(*connection, distance + 1);
-                        queue.push_back(*connection);
-                    }
-                }
-            } else {
-                continue;
-            }
-        } else {
+        let Some(node) = queue.pop_front() else {
             break;
+        };
+
+        let distance = *distance_map
+            .get(&node)
+            .expect("Queued node should have a distance");
+        let Some(connections) = node_map.get(&node) else {
+            continue;
+        };
+
+        for connection in connections {
+            if !distance_map.contains_key(connection) {
+                distance_map.insert(*connection, distance + 1);
+                queue.push_back(*connection);
+            }
         }
     }
 
