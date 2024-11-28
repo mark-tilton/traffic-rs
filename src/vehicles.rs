@@ -109,33 +109,13 @@ pub fn spawn_vehicle(
         return;
     }
 
-    // Choose a random starting node for the path
+    // Choose random source and destination nodes
     let mut rng = rand::thread_rng();
-    let Some(start_node) = node_graph.source_nodes.iter().choose(&mut rng) else {
-        return;
-    };
-
-    // Choose random connecting nodes until we hit a terminal node.
-    // This loop will run forever if there are any loops that
-    // can't eventually hit a destination node.
-    let mut node_path = vec![*start_node];
-    loop {
-        let latest_node = node_path.last().unwrap();
-
-        let next_node = node_graph
-            .node_map
-            .get(latest_node)
-            .expect("Invalid node path")
-            .iter()
-            .choose(&mut rng)
-            .expect("Invalid edge map");
-        node_path.push(*next_node);
-
-        // If the new node is a destination node, we're done!
-        if node_graph.dest_nodes.contains(next_node) {
-            break;
-        }
-    }
+    let ((start_node, _), node_path) = node_graph
+        .shortest_path_map
+        .iter()
+        .choose(&mut rng)
+        .expect("No path found");
 
     // Spawn the vehicle entity at the correct position.
     // If we don't get the position here, the entity will be displayed
@@ -148,7 +128,7 @@ pub fn spawn_vehicle(
             transform: Transform::from_translation(start_node_position),
             ..default()
         },
-        Vehicle::new(node_path),
+        Vehicle::new(node_path.clone()),
     ));
 }
 
