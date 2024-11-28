@@ -26,11 +26,15 @@ impl Vehicle {
         &node_graph.nodes[node_index]
     }
 
-    // A vehicle at the end of its path will not have a next node so this function
-    // optionally returns a next node
+    // A vehicle at the end of its path will not have a next node so the result is
+    // optional. This call will still panic in any case where the the index is invalid
+    // but we are not on the last node of the path.
     fn get_next_node<'a>(&self, node_graph: &'a NodeGraph) -> Option<&'a Node> {
-        let node_index = self.path.get(self.path_index + 1)?;
-        Some(&node_graph.nodes[*node_index])
+        if self.path_index == self.path.len() - 1 {
+            return None;
+        }
+        let node_index = self.path[self.path_index + 1];
+        Some(&node_graph.nodes[node_index])
     }
 
     // Gets the world position of the vehicle by interpolating between the
