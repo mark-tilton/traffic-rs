@@ -3,6 +3,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 
 mod node_graph;
+mod vehicle_id_generator;
 mod vehicle_spawn_limiter;
 mod vehicles;
 
@@ -18,6 +19,7 @@ fn main() {
         .add_systems(Update, node_graph::show_node_graph)
         .insert_resource(graph)
         .insert_resource(spawn_limiter)
+        .insert_resource(vehicle_id_generator::VehicleIdGenerator::default())
         .run();
 }
 

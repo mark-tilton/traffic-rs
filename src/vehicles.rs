@@ -4,6 +4,7 @@ use bevy::prelude::*;
 
 use crate::{
     node_graph::{Node, NodeGraph},
+    vehicle_id_generator::VehicleIdGenerator,
     vehicle_spawn_limiter::VehicleSpawnLimiter,
 };
 
@@ -12,6 +13,7 @@ const MAX_SPEED: f32 = 10.;
 
 #[derive(Component)]
 pub struct Vehicle {
+    id: usize,
     // A pre-calculated node path through the network
     path: Vec<usize>,
     // The position of the vehicle along the node path
@@ -24,8 +26,9 @@ pub struct Vehicle {
 }
 
 impl Vehicle {
-    fn new(path: Vec<usize>) -> Self {
+    fn new(id: usize, path: Vec<usize>) -> Self {
         Vehicle {
+            id,
             path,
             path_index: 0,
             edge_position: 0.,
@@ -103,6 +106,7 @@ pub fn spawn_vehicle(
     mut materials: ResMut<Assets<StandardMaterial>>,
     node_graph: Res<NodeGraph>,
     mut spawn_limiter: ResMut<VehicleSpawnLimiter>,
+    mut vehicle_id_generator: ResMut<VehicleIdGenerator>,
 ) {
     // Only allow vehicle spawning at certain intervals
     if !spawn_limiter.try_spawn() {
@@ -128,7 +132,7 @@ pub fn spawn_vehicle(
             transform: Transform::from_translation(start_node_position),
             ..default()
         },
-        Vehicle::new(node_path.clone()),
+        Vehicle::new(vehicle_id_generator.get_id(), node_path.clone()),
     ));
 }
 
