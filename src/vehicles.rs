@@ -7,6 +7,9 @@ use crate::{
     vehicle_spawn_limiter::VehicleSpawnLimiter,
 };
 
+const MIN_SPEED: f32 = 1.;
+const MAX_SPEED: f32 = 10.;
+
 #[derive(Component)]
 pub struct Vehicle {
     // A pre-calculated node path through the network
@@ -16,9 +19,20 @@ pub struct Vehicle {
     // A parameterized value along the edge described by
     // (path[path_index], path[path_index+1])
     edge_position: f32,
+    // The speed of the vehicle
+    speed: f32,
 }
 
 impl Vehicle {
+    fn new(path: Vec<usize>) -> Self {
+        Vehicle {
+            path,
+            path_index: 0,
+            edge_position: 0.,
+            speed: MIN_SPEED + (MAX_SPEED - MIN_SPEED) * rand::random::<f32>(),
+        }
+    }
+
     // These getter functions will panic if the vehicle is in a malformed state or
     // if the node graph is mutated
     fn get_current_node<'a>(&self, node_graph: &'a NodeGraph) -> &'a Node {
@@ -134,11 +148,7 @@ pub fn spawn_vehicle(
             transform: Transform::from_translation(start_node_position),
             ..default()
         },
-        Vehicle {
-            path: node_path,
-            path_index: 0,
-            edge_position: 0.,
-        },
+        Vehicle::new(node_path),
     ));
 }
 
@@ -149,7 +159,7 @@ pub fn move_vehicles(
     time: Res<Time>,
 ) {
     for (entity, mut transform, mut vehicle) in &mut vehicle_query {
-        let speed = 5.;
+        let speed = vehicle.speed;
 
         // Drive the given distance and update the position of the transform
         vehicle.drive(speed * time.delta_seconds(), &node_graph);
