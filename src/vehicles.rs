@@ -120,56 +120,59 @@ impl Vehicle {
         new_edge_position: f32,
         node_graph: &mut NodeGraph,
     ) -> bool {
-        // if there is a next node
+        // don't wait if there is no next node
         let Some(next_node_index) = self.get_next_node_index() else {
             return false;
         };
 
-        // and the next node isn't our destination
+        // don't wait if the next node is our destination
         if self.path_index == self.path.len() - 2 {
             return false;
         }
 
-        // and we are in reservation range of the next node
+        // don't wait if we are outside of the reservation range of the next node
         let distance_to_next_node = 1.0 - new_edge_position;
         if distance_to_next_node > edge_buffer {
             return false;
         }
 
-        // TODO: update this to allow following cars through intersections
-        // this can be accomplished by checking the direction of the car with
-        // the reservation and if it is the same then overwrite the reservation
-        // with this vehicle's id.
-
         // get the vehicle id which reserved the node
-        let Some(vehicle_id_with_reservation) =
+        if let Some(vehicle_id_with_reservation) =
             node_graph.node_reservation_map.get(&next_node_index)
-        else {
+        {
+            // TODO: update this to allow following cars through intersections
+            // this can be accomplished by checking the direction of the car with
+            // the reservation and if it is the same then overwrite the reservation
+            // with this vehicle's id.
+
+            // stop driving if this node is reserved by another vehicle
+            return self.id != *vehicle_id_with_reservation;
+        } else {
             // there's no reservation, reserve it
             node_graph
                 .node_reservation_map
                 .insert(next_node_index, self.id);
             return false;
         };
-
-        // if it's not us, stop driving
-        self.id != *vehicle_id_with_reservation
     }
 
     fn try_clear_node_reservation(&self, edge_buffer: f32, node_graph: &mut NodeGraph) {
-        // if we are outside of reservation range of the current node
+        // check if we are outside the reservation range of the current node
         let current_node_index = self.get_current_node_index();
-        if self.edge_position > edge_buffer {
-            // and the current node is reserved
-            if let Some(reserved_current_node) =
-                node_graph.node_reservation_map.get(&current_node_index)
-            {
-                // and we have the reservation
-                if *reserved_current_node == self.id {
-                    // clear the registration
-                    node_graph.node_reservation_map.remove(&current_node_index);
-                }
-            }
+        if self.edge_position < edge_buffer {
+            return;
+        }
+
+        // don't need to clear reservation if the current node has no reservation
+        let Some(reserved_current_node) = node_graph.node_reservation_map.get(&current_node_index)
+        else {
+            return;
+        };
+
+        // check if we have the reservation
+        if *reserved_current_node == self.id {
+            // clear the reservation
+            node_graph.node_reservation_map.remove(&current_node_index);
         }
     }
 
