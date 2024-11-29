@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::{
     node_graph::{Node, NodeGraph},
-    vehicle_id_generator::VehicleIdGenerator,
+    vehicle_id_generator::{self, VehicleIdGenerator},
     vehicle_spawn_limiter::VehicleSpawnLimiter,
 };
 
@@ -121,36 +121,39 @@ impl Vehicle {
         node_graph: &mut NodeGraph,
     ) -> bool {
         // if there is a next node
-        if let Some(next_node_index) = self.get_next_node_index() {
-            // and the next node isn't our destination
-            if self.path_index != self.path.len() - 2 {
-                // and we are in reservation range of the next node
-                let distance_to_next_node = 1.0 - new_edge_position;
-                if distance_to_next_node < edge_buffer {
-                    // TODO: update this to allow following cars through intersections
-                    // this can be accomplished by checking the direction of the car with
-                    // the reservation and if it is the same then overwrite the reservation
-                    // with this vehicle's id.
+        let Some(next_node_index) = self.get_next_node_index() else {
+            return false;
+        };
 
-                    // get the vehicle id which reserved the node
-                    if let Some(vehicle_id_with_reservation) =
-                        node_graph.node_reservation_map.get(&next_node_index)
-                    {
-                        // if it's not us, stop driving
-                        if self.id != *vehicle_id_with_reservation {
-                            return true;
-                        }
-                    } else {
-                        // there's no reservation, reserve it
-                        node_graph
-                            .node_reservation_map
-                            .insert(next_node_index, self.id);
-                    }
-                }
-            }
+        // and the next node isn't our destination
+        if self.path_index == self.path.len() - 2 {
+            return false;
         }
 
-        return false;
+        // and we are in reservation range of the next node
+        let distance_to_next_node = 1.0 - new_edge_position;
+        if distance_to_next_node > edge_buffer {
+            return false;
+        }
+
+        // TODO: update this to allow following cars through intersections
+        // this can be accomplished by checking the direction of the car with
+        // the reservation and if it is the same then overwrite the reservation
+        // with this vehicle's id.
+
+        // get the vehicle id which reserved the node
+        let Some(vehicle_id_with_reservation) =
+            node_graph.node_reservation_map.get(&next_node_index)
+        else {
+            // there's no reservation, reserve it
+            node_graph
+                .node_reservation_map
+                .insert(next_node_index, self.id);
+            return false;
+        };
+
+        // if it's not us, stop driving
+        self.id != *vehicle_id_with_reservation
     }
 
     fn try_clear_node_reservation(&self, edge_buffer: f32, node_graph: &mut NodeGraph) {
