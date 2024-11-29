@@ -22,6 +22,8 @@ pub struct NodeGraph {
     pub node_map: HashMap<usize, HashSet<usize>>,
     // Stores the shortest path for a given source/destination node pair
     pub shortest_path_map: HashMap<(usize, usize), Vec<usize>>,
+    // Stores which vehicle has a given node reserved
+    pub node_reservation_map: HashMap<usize, usize>,
 }
 
 impl NodeGraph {
@@ -103,6 +105,7 @@ impl NodeGraph {
             dest_nodes,
             node_map,
             shortest_path_map,
+            node_reservation_map: HashMap::new(),
         }
     }
 }

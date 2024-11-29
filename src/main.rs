@@ -9,7 +9,7 @@ mod vehicles;
 
 fn main() {
     let graph = node_graph::NodeGraph::create();
-    let spawn_interval = Duration::from_millis(750);
+    let spawn_interval = Duration::from_millis(500);
     let spawn_limiter = vehicle_spawn_limiter::VehicleSpawnLimiter::new(spawn_interval);
     App::new()
         .add_plugins(DefaultPlugins)
