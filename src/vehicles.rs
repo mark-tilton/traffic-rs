@@ -4,7 +4,8 @@ use bevy::prelude::*;
 
 use crate::{
     node_graph::{Node, NodeGraph},
-    vehicle_id_generator::{self, VehicleIdGenerator},
+    node_graph_renderer::{self, NodeGraphRenderer},
+    vehicle_id_generator::VehicleIdGenerator,
     vehicle_spawn_limiter::VehicleSpawnLimiter,
 };
 
@@ -189,7 +190,8 @@ pub fn spawn_vehicle(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    node_graph: Res<NodeGraph>,
+    mut node_graph: ResMut<NodeGraph>,
+    mut node_graph_renderer: ResMut<NodeGraphRenderer>,
     mut spawn_limiter: ResMut<VehicleSpawnLimiter>,
     mut vehicle_id_generator: ResMut<VehicleIdGenerator>,
 ) {
@@ -200,24 +202,37 @@ pub fn spawn_vehicle(
 
     // Choose random source and destination nodes
     let mut rng = rand::thread_rng();
-    let ((start_node, _), node_path) = node_graph
+    let ((source_node, dest_node), node_path) = node_graph
         .shortest_path_map
         .iter()
         .choose(&mut rng)
         .expect("No path found");
 
+    let vehicle_id = vehicle_id_generator.get_id();
+
+    // Highlight this vehicle if there is no current highlight
+    let highlight_vehicle = node_graph_renderer.highlighted_vehicle_id.is_none();
+    let vehicle_color: Color;
+    if highlight_vehicle {
+        node_graph_renderer.highlighted_vehicle_id = Some(vehicle_id);
+        node_graph_renderer.highlighted_path_index = Some((*source_node, *dest_node));
+        vehicle_color = Color::srgb(1., 1., 0.);
+    } else {
+        vehicle_color = Color::srgb(0.3, 0.3, 0.5);
+    }
+
     // Spawn the vehicle entity at the correct position.
     // If we don't get the position here, the entity will be displayed
     // at the center of the scene for a frame.
-    let start_node_position = node_graph.nodes.get(*start_node).unwrap().position;
+    let start_node_position = node_graph.nodes.get(*source_node).unwrap().position;
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(Cuboid::new(0.3, 0.2, 0.5).mesh()),
-            material: materials.add(Color::srgb(0.3, 0.3, 0.5)),
+            material: materials.add(vehicle_color),
             transform: Transform::from_translation(start_node_position),
             ..default()
         },
-        Vehicle::new(vehicle_id_generator.get_id(), node_path.clone()),
+        Vehicle::new(vehicle_id, node_path.clone()),
     ));
 }
 
@@ -225,6 +240,7 @@ pub fn move_vehicles(
     mut commands: Commands,
     mut vehicle_query: Query<(Entity, &mut Transform, &mut Vehicle)>,
     mut node_graph: ResMut<NodeGraph>,
+    mut node_graph_renderer: ResMut<NodeGraphRenderer>,
     time: Res<Time>,
 ) {
     for (entity, mut transform, mut vehicle) in &mut vehicle_query {
@@ -236,9 +252,18 @@ pub fn move_vehicles(
 
         // Despawn the vehicle if it's on the final node.
         let Some(next_node) = vehicle.get_next_node(&node_graph) else {
+            // Clear the highlight if this vehicle was being highlighted
+            if let Some(highlighted_vehicle_id) = node_graph_renderer.highlighted_vehicle_id {
+                if highlighted_vehicle_id == vehicle.id {
+                    node_graph_renderer.highlighted_vehicle_id = None;
+                    node_graph_renderer.highlighted_path_index = None;
+                }
+            }
+
             commands.entity(entity).despawn();
             continue;
         };
+
         transform.look_at(next_node.position, Dir3::Y);
     }
 }

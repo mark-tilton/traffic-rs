@@ -108,6 +108,18 @@ impl NodeGraph {
             node_reservation_map: HashMap::new(),
         }
     }
+
+    pub fn is_edge_in_path(source_node: usize, dest_node: usize, path: &Vec<usize>) -> bool {
+        let Some(source_index) = path.iter().position(|x| x == &source_node) else {
+            return false;
+        };
+
+        let Some(dest_index) = path.iter().position(|x| x == &dest_node) else {
+            return false;
+        };
+
+        return dest_index == source_index + 1;
+    }
 }
 
 fn calculate_shortest_path_map(
@@ -220,33 +232,7 @@ fn calculate_distance_map(
             }
         }
     }
-
     return distance_map;
-}
-
-pub fn show_node_graph(node_graph: Res<NodeGraph>, mut gizmos: Gizmos) {
-    let node_radius = 0.5;
-    // Draw nodes different colors based on their types
-    for (i, node) in node_graph.nodes.iter().enumerate() {
-        let color = if node_graph.source_nodes.contains(&i) {
-            Color::srgb(0.1, 0.9, 0.1)
-        } else if node_graph.dest_nodes.contains(&i) {
-            Color::srgb(0.9, 0.1, 0.1)
-        } else {
-            Color::srgb(0.1, 0.1, 0.9)
-        };
-        gizmos.sphere(node.position, Quat::IDENTITY, node_radius, color);
-    }
-
-    // Draw edges as arrows while leaving space for the node.
-    for (source, dest) in node_graph.edges.iter() {
-        let source_pos = node_graph.nodes[*source].position;
-        let dest_pos = node_graph.nodes[*dest].position;
-        let dest_to_src = dest_pos - source_pos;
-        let arrow_start = source_pos + dest_to_src.normalize() * node_radius;
-        let arrow_end = source_pos + dest_to_src.normalize() * (dest_to_src.length() - node_radius);
-        gizmos.arrow(arrow_start, arrow_end, Color::srgb(1., 1., 1.));
-    }
 }
 
 #[cfg(test)]
