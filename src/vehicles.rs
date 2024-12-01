@@ -1,15 +1,18 @@
+use core::f32;
+use std::collections::HashMap;
+
 use rand::{self, seq::IteratorRandom};
 
 use bevy::prelude::*;
 
 use crate::{
     node_graph::{Node, NodeGraph},
-    node_graph_renderer::{self, NodeGraphRenderer},
+    node_graph_renderer::NodeGraphRenderer,
     vehicle_id_generator::VehicleIdGenerator,
     vehicle_spawn_limiter::VehicleSpawnLimiter,
 };
 
-const MIN_SPEED: f32 = 1.;
+const MIN_SPEED: f32 = 4.;
 const MAX_SPEED: f32 = 10.;
 
 #[derive(Component)]
@@ -64,6 +67,11 @@ impl Vehicle {
         Some(self.path[self.path_index + 1])
     }
 
+    fn get_edge(&self) -> Option<(usize, usize)> {
+        let next_node = self.get_next_node_index()?;
+        Some((self.get_current_node_index(), next_node))
+    }
+
     // Gets the world position of the vehicle by interpolating between the
     // positions of the current and next nodes
     fn get_world_position(&self, node_graph: &NodeGraph) -> Vec3 {
@@ -75,10 +83,37 @@ impl Vehicle {
         current_node_pos + (next_node.position - current_node_pos) * self.edge_position
     }
 
+    // Gets the distance in edge space to the next vehicle on the current edge.
+    // Returns None if there are no vehicles in front of the vehicle.
+    fn get_next_vehicle_edge_distance(
+        &self,
+        vehicle_map: &HashMap<(usize, usize), Vec<f32>>,
+    ) -> Option<f32> {
+        let edge = self.get_edge()?;
+        let vehicles_on_edge = vehicle_map.get(&edge)?;
+        let mut closest_vehicle = None;
+        for edge_position in vehicles_on_edge {
+            let vehicle_distance = edge_position - self.edge_position;
+            // Ignore self and trailing vehicles
+            if vehicle_distance <= 0. {
+                continue;
+            }
+            if closest_vehicle.is_none() || vehicle_distance < closest_vehicle? {
+                closest_vehicle = Some(vehicle_distance);
+            }
+        }
+        closest_vehicle
+    }
+
     // Attempts to drive along the current edge by a given world space distance.
     // If the vehicle hits the end of the edge, the path will be incremented and
     // the remaining distance will be returned.
-    fn drive_edge(&mut self, distance: f32, node_graph: &mut NodeGraph) -> f32 {
+    fn drive_edge(
+        &mut self,
+        distance: f32,
+        node_graph: &mut NodeGraph,
+        vehicle_map: &HashMap<(usize, usize), Vec<f32>>,
+    ) -> f32 {
         // Calculate the parameterized speed of the vehicle along the edge
         // by querying the current and next nodes
         let current_node = self.get_current_node(node_graph);
@@ -88,8 +123,19 @@ impl Vehicle {
         };
         let edge_vector = next_node.position - current_node.position;
         let edge_length = edge_vector.length();
-        let edge_speed = distance / edge_length;
-        let new_edge_position = self.edge_position + edge_speed;
+        let mut edge_move_amount = distance / edge_length;
+
+        // Clamp move amount to not pass the next vehicle
+        if let Some(next_vehicle_distance) = self.get_next_vehicle_edge_distance(vehicle_map) {
+            let follow_distance = 0.7;
+            let edge_follow_distance = follow_distance / edge_length;
+            let follow_point = next_vehicle_distance - edge_follow_distance;
+            if follow_point < edge_move_amount {
+                edge_move_amount = follow_point;
+            }
+        }
+
+        let new_edge_position = self.edge_position + edge_move_amount;
 
         // The distance a vehicle should stay back from a node when waiting
         // Note: make sure this smaller than (min dist between connected nodes along a bidirectional edge / 2)
@@ -147,14 +193,14 @@ impl Vehicle {
             // with this vehicle's id.
 
             // stop driving if this node is reserved by another vehicle
-            return self.id != *vehicle_id_with_reservation;
+            self.id != *vehicle_id_with_reservation
         } else {
             // there's no reservation, reserve it
             node_graph
                 .node_reservation_map
                 .insert(next_node_index, self.id);
-            return false;
-        };
+            false
+        }
     }
 
     fn try_clear_node_reservation(&self, edge_buffer: f32, node_graph: &mut NodeGraph) {
@@ -178,10 +224,15 @@ impl Vehicle {
     }
 
     // Drives along the vehicles node path by a specified world space distance
-    fn drive(&mut self, distance: f32, node_graph: &mut NodeGraph) {
+    fn drive(
+        &mut self,
+        distance: f32,
+        node_graph: &mut NodeGraph,
+        vehicle_map: &HashMap<(usize, usize), Vec<f32>>,
+    ) {
         let mut remaining_distance = distance;
         while remaining_distance > 0. {
-            remaining_distance = self.drive_edge(remaining_distance, node_graph);
+            remaining_distance = self.drive_edge(remaining_distance, node_graph, vehicle_map);
         }
     }
 }
@@ -190,7 +241,7 @@ pub fn spawn_vehicle(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut node_graph: ResMut<NodeGraph>,
+    node_graph: Res<NodeGraph>,
     mut node_graph_renderer: ResMut<NodeGraphRenderer>,
     mut spawn_limiter: ResMut<VehicleSpawnLimiter>,
     mut vehicle_id_generator: ResMut<VehicleIdGenerator>,
@@ -243,11 +294,27 @@ pub fn move_vehicles(
     mut node_graph_renderer: ResMut<NodeGraphRenderer>,
     time: Res<Time>,
 ) {
+    // Build a map to communicate vehicle positions between vehicles
+    let mut vehicle_map: HashMap<(usize, usize), Vec<f32>> = HashMap::new();
+    for (_, _, vehicle) in &mut vehicle_query {
+        let Some(edge) = vehicle.get_edge() else {
+            continue;
+        };
+        vehicle_map
+            .entry(edge)
+            .or_default()
+            .push(vehicle.edge_position);
+    }
+
     for (entity, mut transform, mut vehicle) in &mut vehicle_query {
         let speed = vehicle.speed;
 
         // Drive the given distance and update the position of the transform
-        vehicle.drive(speed * time.delta_seconds(), node_graph.as_mut());
+        vehicle.drive(
+            speed * time.delta_seconds(),
+            node_graph.as_mut(),
+            &vehicle_map,
+        );
         transform.translation = vehicle.get_world_position(&node_graph);
 
         // Despawn the vehicle if it's on the final node.
