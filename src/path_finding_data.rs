@@ -183,9 +183,10 @@ mod tests {
             // (5, 4, vec![5, 8, 11, 10, 4]),
         ];
         let graph = NodeGraph::create();
+        let path_finding_data = PathFindingData::new(&graph);
 
         for (source_node, dest_node, expected_path) in expected_values {
-            let shortest_path = graph
+            let shortest_path = path_finding_data
                 .shortest_path_map
                 .get(&(source_node, dest_node))
                 .unwrap();

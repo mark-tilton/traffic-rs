@@ -1,7 +1,6 @@
-use std::collections::HashSet;
-
 use bevy::{math::Vec3, prelude::Resource};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
@@ -84,5 +83,32 @@ impl NodeGraph {
         };
 
         return dest_index == source_index + 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs::File,
+        io::{Read, Write},
+    };
+
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn save_node_graph() {
+        let graph = NodeGraph::create();
+        let json = serde_json::to_string(&graph).unwrap();
+        let mut file = File::create("graph.json").unwrap();
+        file.write_all(json.as_bytes()).unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn load_node_graph() {
+        let mut file = File::open("graph.json").unwrap();
+        let mut json = String::new();
+        file.read_to_string(&mut json).unwrap();
     }
 }
