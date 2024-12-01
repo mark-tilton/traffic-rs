@@ -3,19 +3,38 @@ use std::collections::HashMap;
 
 use rand::{self, seq::IteratorRandom};
 
-use bevy::prelude::*;
+use bevy::{prelude::*, reflect::Map};
 
 use crate::{
     node_graph::{Node, NodeGraph},
     node_graph_renderer::NodeGraphRenderer,
-    vehicle_id_generator::VehicleIdGenerator,
+    vehicle_id_generator::{self, VehicleIdGenerator},
     vehicle_spawn_limiter::VehicleSpawnLimiter,
 };
 
 const MIN_SPEED: f32 = 4.;
 const MAX_SPEED: f32 = 10.;
 
-#[derive(Component)]
+#[derive(Default)]
+struct VehicleCollection {
+    vehicles: HashMap<usize, Vehicle>,
+    vehicle_edge_map: HashMap<(usize, usize), Vec<usize>>,
+}
+
+impl VehicleCollection {
+    fn add(&mut self, vehicle: &Vehicle) {
+        let Some(edge) = vehicle.get_edge() else {
+            return;
+        };
+        self.vehicles.insert(vehicle.id, vehicle.clone());
+        self.vehicle_edge_map
+            .entry(edge)
+            .or_default()
+            .push(vehicle.id);
+    }
+}
+
+#[derive(Component, Clone)]
 pub struct Vehicle {
     id: usize,
     // A pre-calculated node path through the network
@@ -87,13 +106,16 @@ impl Vehicle {
     // Returns None if there are no vehicles in front of the vehicle.
     fn get_next_vehicle_edge_distance(
         &self,
-        vehicle_map: &HashMap<(usize, usize), Vec<f32>>,
+        vehicle_collection: &VehicleCollection,
     ) -> Option<f32> {
         let edge = self.get_edge()?;
-        let vehicles_on_edge = vehicle_map.get(&edge)?;
+        let vehicles_on_edge = vehicle_collection.vehicle_edge_map.get(&edge)?;
         let mut closest_vehicle = None;
-        for edge_position in vehicles_on_edge {
-            let vehicle_distance = edge_position - self.edge_position;
+        for vehicle_id in vehicles_on_edge {
+            let Some(vehicle) = vehicle_collection.vehicles.get(vehicle_id) else {
+                continue;
+            };
+            let vehicle_distance = vehicle.edge_position - self.edge_position;
             // Ignore self and trailing vehicles
             if vehicle_distance <= 0. {
                 continue;
@@ -112,7 +134,7 @@ impl Vehicle {
         &mut self,
         distance: f32,
         node_graph: &mut NodeGraph,
-        vehicle_map: &HashMap<(usize, usize), Vec<f32>>,
+        vehicle_collection: &VehicleCollection,
     ) -> f32 {
         // Calculate the parameterized speed of the vehicle along the edge
         // by querying the current and next nodes
@@ -126,7 +148,8 @@ impl Vehicle {
         let mut edge_move_amount = distance / edge_length;
 
         // Clamp move amount to not pass the next vehicle
-        if let Some(next_vehicle_distance) = self.get_next_vehicle_edge_distance(vehicle_map) {
+        if let Some(next_vehicle_distance) = self.get_next_vehicle_edge_distance(vehicle_collection)
+        {
             let follow_distance = 0.7;
             let edge_follow_distance = follow_distance / edge_length;
             let follow_point = next_vehicle_distance - edge_follow_distance;
@@ -142,7 +165,6 @@ impl Vehicle {
         let node_buffer = 0.9;
         let edge_buffer = node_buffer / edge_length;
 
-        self.try_clear_node_reservation(edge_buffer, node_graph);
         if self.should_wait_at_node(edge_buffer, new_edge_position, node_graph) {
             // move vehicle as close to node as possible and wait for reservation
             self.edge_position = 1.0 - edge_buffer;
@@ -184,43 +206,19 @@ impl Vehicle {
         }
 
         // get the vehicle id which reserved the node
-        if let Some(vehicle_id_with_reservation) =
+        let Some(vehicle_id_with_reservation) =
             node_graph.node_reservation_map.get(&next_node_index)
-        {
-            // TODO: update this to allow following cars through intersections
-            // this can be accomplished by checking the direction of the car with
-            // the reservation and if it is the same then overwrite the reservation
-            // with this vehicle's id.
-
-            // stop driving if this node is reserved by another vehicle
-            self.id != *vehicle_id_with_reservation
-        } else {
-            // there's no reservation, reserve it
-            node_graph
-                .node_reservation_map
-                .insert(next_node_index, self.id);
-            false
-        }
-    }
-
-    fn try_clear_node_reservation(&self, edge_buffer: f32, node_graph: &mut NodeGraph) {
-        // check if we are outside the reservation range of the current node
-        let current_node_index = self.get_current_node_index();
-        if self.edge_position < edge_buffer {
-            return;
-        }
-
-        // don't need to clear reservation if the current node has no reservation
-        let Some(reserved_current_node) = node_graph.node_reservation_map.get(&current_node_index)
         else {
-            return;
+            return false;
         };
 
-        // check if we have the reservation
-        if *reserved_current_node == self.id {
-            // clear the reservation
-            node_graph.node_reservation_map.remove(&current_node_index);
-        }
+        // TODO: update this to allow following cars through intersections
+        // this can be accomplished by checking the direction of the car with
+        // the reservation and if it is the same then overwrite the reservation
+        // with this vehicle's id.
+
+        // stop driving if this node is reserved by another vehicle
+        self.id != *vehicle_id_with_reservation
     }
 
     // Drives along the vehicles node path by a specified world space distance
@@ -228,11 +226,80 @@ impl Vehicle {
         &mut self,
         distance: f32,
         node_graph: &mut NodeGraph,
-        vehicle_map: &HashMap<(usize, usize), Vec<f32>>,
+        vehicle_collection: &VehicleCollection,
     ) {
         let mut remaining_distance = distance;
         while remaining_distance > 0. {
-            remaining_distance = self.drive_edge(remaining_distance, node_graph, vehicle_map);
+            remaining_distance =
+                self.drive_edge(remaining_distance, node_graph, vehicle_collection);
+        }
+    }
+}
+
+fn clear_node_reservations(vehicle_collection: &VehicleCollection, node_graph: &mut NodeGraph) {
+    // The distance a vehicle should stay back from a node when waiting
+    // Note: make sure this smaller than (min dist between connected nodes along a bidirectional edge / 2)
+    let node_buffer = 0.3;
+    let mut cleared_nodes = Vec::new();
+    for (node_index, vehicle_id) in node_graph.node_reservation_map.clone() {
+        let Some(node) = node_graph.nodes.get(node_index) else {
+            continue;
+        };
+
+        let Some(vehicle) = vehicle_collection.vehicles.get(&vehicle_id) else {
+            continue;
+        };
+
+        let distance = (node.position - vehicle.get_world_position(node_graph)).length();
+        if distance > node_buffer {
+            cleared_nodes.push(node_index);
+        }
+    }
+    for node_index in cleared_nodes {
+        node_graph.node_reservation_map.remove(&node_index);
+    }
+}
+
+fn create_node_reservations(vehicle_collection: &VehicleCollection, node_graph: &mut NodeGraph) {
+    let node_buffer = 0.9;
+    for node_index in 0..node_graph.nodes.len() {
+        // Ignore nodes that are already reserved
+        if node_graph.node_reservation_map.contains_key(&node_index) {
+            continue;
+        }
+
+        let mut reserved_vehicle = None;
+        let mut is_priority = false;
+        // Find all the edges pointing to this node
+        let Some(prev_nodes) = node_graph.reverse_node_map.get(&node_index) else {
+            // Continue if this is a source node
+            continue;
+        };
+        let node = node_graph.nodes.get(node_index).unwrap();
+        for prev_node_index in prev_nodes {
+            let edge = (*prev_node_index, node_index);
+            let edge_data = node_graph.edges.get(&edge).unwrap();
+            if is_priority && !edge_data.priority {
+                continue;
+            }
+            let Some(vehicles) = vehicle_collection.vehicle_edge_map.get(&edge) else {
+                // Continue if there are no vehicles on the edge
+                continue;
+            };
+            for vehicle_id in vehicles {
+                let vehicle = vehicle_collection.vehicles.get(vehicle_id).unwrap();
+                let vehicle_distance =
+                    (vehicle.get_world_position(node_graph) - node.position).length();
+                if vehicle_distance < node_buffer {
+                    reserved_vehicle = Some(*vehicle_id);
+                    is_priority = edge_data.priority;
+                }
+            }
+        }
+        if let Some(vehicle_id) = reserved_vehicle {
+            node_graph
+                .node_reservation_map
+                .insert(node_index, vehicle_id);
         }
     }
 }
@@ -295,16 +362,13 @@ pub fn move_vehicles(
     time: Res<Time>,
 ) {
     // Build a map to communicate vehicle positions between vehicles
-    let mut vehicle_map: HashMap<(usize, usize), Vec<f32>> = HashMap::new();
+    let mut vehicle_collection = VehicleCollection::default();
     for (_, _, vehicle) in &mut vehicle_query {
-        let Some(edge) = vehicle.get_edge() else {
-            continue;
-        };
-        vehicle_map
-            .entry(edge)
-            .or_default()
-            .push(vehicle.edge_position);
+        vehicle_collection.add(&vehicle);
     }
+
+    clear_node_reservations(&vehicle_collection, &mut node_graph);
+    create_node_reservations(&vehicle_collection, &mut node_graph);
 
     for (entity, mut transform, mut vehicle) in &mut vehicle_query {
         let speed = vehicle.speed;
@@ -312,8 +376,8 @@ pub fn move_vehicles(
         // Drive the given distance and update the position of the transform
         vehicle.drive(
             speed * time.delta_seconds(),
-            node_graph.as_mut(),
-            &vehicle_map,
+            &mut node_graph,
+            &vehicle_collection,
         );
         transform.translation = vehicle.get_world_position(&node_graph);
 

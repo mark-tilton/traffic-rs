@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    usize,
-};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use bevy::prelude::*;
 
@@ -10,16 +7,23 @@ pub struct Node {
     pub position: Vec3,
 }
 
+#[derive(Default)]
+pub struct Edge {
+    pub priority: bool,
+}
+
 #[derive(Resource)]
 pub struct NodeGraph {
     pub nodes: Vec<Node>,
-    pub edges: HashSet<(usize, usize)>,
+    pub edges: HashMap<(usize, usize), Edge>,
     // Source nodes are nodes that have no other nodes pointing to them
     pub source_nodes: HashSet<usize>,
     // Destination nodes are nodes that don't have any nodes leading from them
     pub dest_nodes: HashSet<usize>,
     // A convenient data structure for navigating forward through the graph
     pub node_map: HashMap<usize, HashSet<usize>>,
+    // A convenient data structure for navigating backward through the graph
+    pub reverse_node_map: HashMap<usize, HashSet<usize>>,
     // Stores the shortest path for a given source/destination node pair
     pub shortest_path_map: HashMap<(usize, usize), Vec<usize>>,
     // Stores which vehicle has a given node reserved
@@ -39,7 +43,7 @@ impl NodeGraph {
     //          |     ^
     //          V     |
     //          0     1
-    pub fn create() -> Self {
+    pub fn create_nightmare() -> Self {
         // Bevy uses a right handed y-up coordinate system
         // This means that the forward vector is -z
         let node_positions = [
@@ -62,48 +66,115 @@ impl NodeGraph {
             Vec3::new(1., 0., -1.),
         ];
         let nodes = node_positions.map(|position| Node { position }).to_vec();
-        let edges = HashSet::from([
+        let edges = HashMap::from([
             // Sources to the intersection
-            (1, 9),
-            (2, 10),
-            (6, 11),
-            (5, 8),
+            ((1, 9), Edge { priority: false }),
+            ((2, 10), Edge { priority: false }),
+            ((6, 11), Edge { priority: false }),
+            ((5, 8), Edge { priority: false }),
             // Intersection out to destinations
-            (9, 7),
-            (11, 3),
-            (10, 4),
-            (8, 0),
+            ((9, 7), Edge { priority: false }),
+            ((11, 3), Edge { priority: false }),
+            ((10, 4), Edge { priority: false }),
+            ((8, 0), Edge { priority: false }),
             // Intersection to intersection
-            (9, 11),
-            (9, 10),
-            (11, 10),
-            (11, 8),
-            (10, 8),
-            (10, 9),
-            (8, 9),
-            (8, 11),
+            ((9, 11), Edge { priority: false }),
+            ((9, 10), Edge { priority: false }),
+            ((11, 10), Edge { priority: false }),
+            ((11, 8), Edge { priority: false }),
+            ((10, 8), Edge { priority: false }),
+            ((10, 9), Edge { priority: false }),
+            ((8, 9), Edge { priority: false }),
+            ((8, 11), Edge { priority: false }),
         ]);
         Self::new(nodes, edges)
     }
 
-    pub fn new(nodes: Vec<Node>, edges: HashSet<(usize, usize)>) -> Self {
+    // Creates a four way intersection with the following structure
+    //          2     3
+    //          ^     |
+    //          |     V
+    //    4--->10<----11---->6
+    //          |     ^
+    //          |     |
+    //          V     |
+    //    5<----8---->9<-----7
+    //          ^     |
+    //          |     V
+    //          0     1
+    pub fn create_roundabout() -> Self {
+        // Bevy uses a right handed y-up coordinate system
+        // This means that the forward vector is -z
+        let node_positions = [
+            // Bottom
+            Vec3::new(-5., 0., 10.),
+            Vec3::new(5., 0., 10.),
+            // Top
+            Vec3::new(-5., 0., -10.),
+            Vec3::new(5., 0., -10.),
+            // Left
+            Vec3::new(-10., 0., -5.),
+            Vec3::new(-10., 0., 5.),
+            // Right
+            Vec3::new(10., 0., -5.),
+            Vec3::new(10., 0., 5.),
+            // Intersection In
+            Vec3::new(-2., 0., 3.),
+            Vec3::new(3., 0., 2.),
+            Vec3::new(-3., 0., -2.),
+            Vec3::new(2., 0., -3.),
+            // Intersection Out
+            Vec3::new(-3., 0., 2.),
+            Vec3::new(2., 0., 3.),
+            Vec3::new(-2., 0., -3.),
+            Vec3::new(3., 0., -2.),
+        ];
+        let nodes = node_positions.map(|position| Node { position }).to_vec();
+        let edges = HashMap::from([
+            // Sources to the intersection
+            ((7, 9), Edge { priority: false }),
+            ((3, 11), Edge { priority: false }),
+            ((4, 10), Edge { priority: false }),
+            ((0, 8), Edge { priority: false }),
+            // Intersection out to destinations
+            ((13, 1), Edge { priority: true }),
+            ((14, 2), Edge { priority: true }),
+            ((15, 6), Edge { priority: true }),
+            ((12, 5), Edge { priority: true }),
+            // Rotary Connections
+            ((12, 8), Edge { priority: true }),
+            ((13, 9), Edge { priority: true }),
+            ((14, 10), Edge { priority: true }),
+            ((15, 11), Edge { priority: true }),
+            ((9, 15), Edge { priority: true }),
+            ((11, 14), Edge { priority: true }),
+            ((10, 12), Edge { priority: true }),
+            ((8, 13), Edge { priority: true }),
+        ]);
+        Self::new(nodes, edges)
+    }
+
+    pub fn new(nodes: Vec<Node>, edges: HashMap<(usize, usize), Edge>) -> Self {
         // Automatically classify nodes as source, or destination nodes based
         // on edge directions.
         let mut source_nodes = HashSet::from_iter(0..nodes.len());
         let mut dest_nodes = HashSet::from_iter(0..nodes.len());
         let mut node_map: HashMap<usize, HashSet<usize>> = HashMap::new();
-        for (source, dest) in edges.iter() {
+        for ((source, dest), _) in edges.iter() {
             dest_nodes.remove(source);
             source_nodes.remove(dest);
             node_map.entry(*source).or_default().insert(*dest);
         }
-        let shortest_path_map = calculate_shortest_path_map(&source_nodes, &dest_nodes, &node_map);
+        let reverse_node_map = calculate_reverse_node_map(&node_map);
+        let shortest_path_map =
+            calculate_shortest_path_map(&source_nodes, &dest_nodes, &node_map, &reverse_node_map);
         NodeGraph {
             nodes,
             edges,
             source_nodes,
             dest_nodes,
             node_map,
+            reverse_node_map,
             shortest_path_map,
             node_reservation_map: HashMap::new(),
         }
@@ -126,14 +197,14 @@ fn calculate_shortest_path_map(
     source_nodes: &HashSet<usize>,
     dest_nodes: &HashSet<usize>,
     node_map: &HashMap<usize, HashSet<usize>>,
+    reverse_node_map: &HashMap<usize, HashSet<usize>>,
 ) -> HashMap<(usize, usize), Vec<usize>> {
     let mut shortest_path_map = HashMap::new();
-    let reverse_node_map = calculate_reverse_node_map(node_map);
 
     for source_node in source_nodes {
         for dest_node in dest_nodes {
             if let Some(shortest_path) =
-                calculate_shortest_path(*source_node, *dest_node, node_map, &reverse_node_map)
+                calculate_shortest_path(*source_node, *dest_node, node_map, reverse_node_map)
             {
                 shortest_path_map.insert((*source_node, *dest_node), shortest_path);
             }
@@ -260,7 +331,7 @@ mod tests {
             (5, 3, vec![5, 8, 11, 3]),
             // (5, 4, vec![5, 8, 11, 10, 4]),
         ];
-        let graph = NodeGraph::create();
+        let graph = NodeGraph::create_nightmare();
 
         for (source_node, dest_node, expected_path) in expected_values {
             let shortest_path = graph

@@ -43,7 +43,7 @@ pub fn show_node_graph(
     };
 
     // Draw edges as arrows while leaving space for the node.
-    for (source, dest) in node_graph.edges.iter() {
+    for ((source, dest), _) in node_graph.edges.iter() {
         let source_pos = node_graph.nodes[*source].position;
         let dest_pos = node_graph.nodes[*dest].position;
         let dest_to_src = dest_pos - source_pos;
