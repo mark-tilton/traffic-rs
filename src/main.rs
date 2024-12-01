@@ -5,12 +5,14 @@ use node_graph_renderer::HighlightedEdgeGizmos;
 
 mod node_graph;
 mod node_graph_renderer;
+mod path_finding_data;
 mod vehicle_id_generator;
 mod vehicle_spawn_limiter;
 mod vehicles;
 
 fn main() {
     let graph = node_graph::NodeGraph::create();
+    let path_finding_data = path_finding_data::PathFindingData::new(&graph);
     let graph_renderer = node_graph_renderer::NodeGraphRenderer::default();
     let spawn_interval = Duration::from_millis(500);
     let spawn_limiter = vehicle_spawn_limiter::VehicleSpawnLimiter::new(spawn_interval);
@@ -24,6 +26,7 @@ fn main() {
         .add_systems(Update, node_graph_renderer::show_node_graph)
         .insert_resource(graph)
         .insert_resource(graph_renderer)
+        .insert_resource(path_finding_data)
         .insert_resource(spawn_limiter)
         .insert_resource(vehicle_id_generator::VehicleIdGenerator::default())
         .run();

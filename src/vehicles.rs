@@ -4,7 +4,8 @@ use bevy::prelude::*;
 
 use crate::{
     node_graph::{Node, NodeGraph},
-    node_graph_renderer::{self, NodeGraphRenderer},
+    node_graph_renderer::NodeGraphRenderer,
+    path_finding_data::PathFindingData,
     vehicle_id_generator::VehicleIdGenerator,
     vehicle_spawn_limiter::VehicleSpawnLimiter,
 };
@@ -78,7 +79,12 @@ impl Vehicle {
     // Attempts to drive along the current edge by a given world space distance.
     // If the vehicle hits the end of the edge, the path will be incremented and
     // the remaining distance will be returned.
-    fn drive_edge(&mut self, distance: f32, node_graph: &mut NodeGraph) -> f32 {
+    fn drive_edge(
+        &mut self,
+        distance: f32,
+        node_graph: &NodeGraph,
+        path_finding_data: &mut PathFindingData,
+    ) -> f32 {
         // Calculate the parameterized speed of the vehicle along the edge
         // by querying the current and next nodes
         let current_node = self.get_current_node(node_graph);
@@ -96,8 +102,8 @@ impl Vehicle {
         let node_buffer = 0.9;
         let edge_buffer = node_buffer / edge_length;
 
-        self.try_clear_node_reservation(edge_buffer, node_graph);
-        if self.should_wait_at_node(edge_buffer, new_edge_position, node_graph) {
+        self.try_clear_node_reservation(edge_buffer, path_finding_data);
+        if self.should_wait_at_node(edge_buffer, new_edge_position, path_finding_data) {
             // move vehicle as close to node as possible and wait for reservation
             self.edge_position = 1.0 - edge_buffer;
             return 0.;
@@ -119,7 +125,7 @@ impl Vehicle {
         &self,
         edge_buffer: f32,
         new_edge_position: f32,
-        node_graph: &mut NodeGraph,
+        path_finding_data: &mut PathFindingData,
     ) -> bool {
         // don't wait if there is no next node
         let Some(next_node_index) = self.get_next_node_index() else {
@@ -139,7 +145,7 @@ impl Vehicle {
 
         // get the vehicle id which reserved the node
         if let Some(vehicle_id_with_reservation) =
-            node_graph.node_reservation_map.get(&next_node_index)
+            path_finding_data.node_reservation_map.get(&next_node_index)
         {
             // TODO: update this to allow following cars through intersections
             // this can be accomplished by checking the direction of the car with
@@ -150,14 +156,18 @@ impl Vehicle {
             return self.id != *vehicle_id_with_reservation;
         } else {
             // there's no reservation, reserve it
-            node_graph
+            path_finding_data
                 .node_reservation_map
                 .insert(next_node_index, self.id);
             return false;
         };
     }
 
-    fn try_clear_node_reservation(&self, edge_buffer: f32, node_graph: &mut NodeGraph) {
+    fn try_clear_node_reservation(
+        &self,
+        edge_buffer: f32,
+        path_finding_data: &mut PathFindingData,
+    ) {
         // check if we are outside the reservation range of the current node
         let current_node_index = self.get_current_node_index();
         if self.edge_position < edge_buffer {
@@ -165,7 +175,9 @@ impl Vehicle {
         }
 
         // don't need to clear reservation if the current node has no reservation
-        let Some(reserved_current_node) = node_graph.node_reservation_map.get(&current_node_index)
+        let Some(reserved_current_node) = path_finding_data
+            .node_reservation_map
+            .get(&current_node_index)
         else {
             return;
         };
@@ -173,15 +185,22 @@ impl Vehicle {
         // check if we have the reservation
         if *reserved_current_node == self.id {
             // clear the reservation
-            node_graph.node_reservation_map.remove(&current_node_index);
+            path_finding_data
+                .node_reservation_map
+                .remove(&current_node_index);
         }
     }
 
     // Drives along the vehicles node path by a specified world space distance
-    fn drive(&mut self, distance: f32, node_graph: &mut NodeGraph) {
+    fn drive(
+        &mut self,
+        distance: f32,
+        node_graph: &NodeGraph,
+        path_finding_data: &mut PathFindingData,
+    ) {
         let mut remaining_distance = distance;
         while remaining_distance > 0. {
-            remaining_distance = self.drive_edge(remaining_distance, node_graph);
+            remaining_distance = self.drive_edge(remaining_distance, node_graph, path_finding_data);
         }
     }
 }
@@ -190,7 +209,8 @@ pub fn spawn_vehicle(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut node_graph: ResMut<NodeGraph>,
+    node_graph: Res<NodeGraph>,
+    path_finding_data: Res<PathFindingData>,
     mut node_graph_renderer: ResMut<NodeGraphRenderer>,
     mut spawn_limiter: ResMut<VehicleSpawnLimiter>,
     mut vehicle_id_generator: ResMut<VehicleIdGenerator>,
@@ -202,7 +222,7 @@ pub fn spawn_vehicle(
 
     // Choose random source and destination nodes
     let mut rng = rand::thread_rng();
-    let ((source_node, dest_node), node_path) = node_graph
+    let ((source_node, dest_node), node_path) = path_finding_data
         .shortest_path_map
         .iter()
         .choose(&mut rng)
@@ -240,6 +260,7 @@ pub fn move_vehicles(
     mut commands: Commands,
     mut vehicle_query: Query<(Entity, &mut Transform, &mut Vehicle)>,
     mut node_graph: ResMut<NodeGraph>,
+    mut path_finding_data: ResMut<PathFindingData>,
     mut node_graph_renderer: ResMut<NodeGraphRenderer>,
     time: Res<Time>,
 ) {
@@ -247,7 +268,11 @@ pub fn move_vehicles(
         let speed = vehicle.speed;
 
         // Drive the given distance and update the position of the transform
-        vehicle.drive(speed * time.delta_seconds(), node_graph.as_mut());
+        vehicle.drive(
+            speed * time.delta_seconds(),
+            node_graph.as_mut(),
+            path_finding_data.as_mut(),
+        );
         transform.translation = vehicle.get_world_position(&node_graph);
 
         // Despawn the vehicle if it's on the final node.

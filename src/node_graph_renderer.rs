@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::node_graph::NodeGraph;
+use crate::{node_graph::NodeGraph, path_finding_data::PathFindingData};
 
 #[derive(Resource, Default)]
 pub struct NodeGraphRenderer {
@@ -20,6 +20,7 @@ pub fn configure_gizmos(mut config_store: ResMut<GizmoConfigStore>) {
 
 pub fn show_node_graph(
     node_graph: Res<NodeGraph>,
+    path_finding_data: Res<PathFindingData>,
     node_graph_renderer: Res<NodeGraphRenderer>,
     mut gizmos: Gizmos,
     mut highlighted_edge_gizmos: Gizmos<HighlightedEdgeGizmos>,
@@ -27,9 +28,9 @@ pub fn show_node_graph(
     let node_radius = 0.5;
     // Draw nodes different colors based on their types
     for (i, node) in node_graph.nodes.iter().enumerate() {
-        let color = if node_graph.source_nodes.contains(&i) {
+        let color = if path_finding_data.source_nodes.contains(&i) {
             Color::srgb(0.1, 0.9, 0.1)
-        } else if node_graph.dest_nodes.contains(&i) {
+        } else if path_finding_data.dest_nodes.contains(&i) {
             Color::srgb(0.9, 0.1, 0.1)
         } else {
             Color::srgb(0.1, 0.1, 0.9)
@@ -38,7 +39,9 @@ pub fn show_node_graph(
     }
 
     let highlighted_path: Option<&Vec<usize>> = match node_graph_renderer.highlighted_path_index {
-        Some(highlighted_path_index) => node_graph.shortest_path_map.get(&highlighted_path_index),
+        Some(highlighted_path_index) => path_finding_data
+            .shortest_path_map
+            .get(&highlighted_path_index),
         None => None,
     };
 
